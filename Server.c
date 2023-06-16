@@ -145,3 +145,143 @@ void delete_senwd()
     printf("删除敏感词成功\n\n");
     fclose(file1);
 }
+
+
+void show_senwd()
+{
+    char s[30][15];
+    memset(s,'\0',200);
+    
+    FILE *file;
+    char *FILE_NAME=(char*)"sensitive_word.bin";
+    file = fopen(FILE_NAME,"rb");    //以rb方式打开文件
+    if (file == NULL) perror("errno");
+    
+    int len;
+    fseek(file, 0, SEEK_END);       //文件指针定位到文件末尾，偏移0个字节 
+    len = ftell(file);              //获取文件长度, ftell函数用于得到文件位置指针当前位置相对于文件首的偏移字节数       
+    
+    fseek(file,0,SEEK_SET);         //将文件指针移回文件的开头 
+    for (int i=0;i<len/15;i++)
+        {
+            fread(s[i],15,1,file);  //读取文件内容，并存入s
+            printf("%d---%s",i+1,s[i]);
+        }      
+    printf("\n");
+}
+
+void manage()
+{
+    int psum=(*addr).psum;
+    printf("\n所有进程及状态：\n");
+    for (int i=0;i<psum;i++)
+    {
+        printf("%d ",(*addr).process[i].pid);
+        if ((*addr).process[i].state) printf("\t在线");
+        else printf("\t离开");
+        if ((*addr).process[i].send_state) printf("\t可发言\n");
+        else printf("\t被禁言\n");
+    }
+    
+    int ctrl;
+    printf("\n输入管理信号：1--移除进程\n2--禁言\n3--解除禁言\n");
+    scanf("%d",&ctrl);
+    
+    if (ctrl==1) {
+        int n;
+        printf("输入要移除的进程号：");
+        scanf("%d",&n);
+        kill(n,SIGUSR2);                      //向要移除的进程发送信号
+        printf("\n进程%d已移除\n",n);
+    }
+    if (ctrl==2 ||ctrl==3) {
+        int n;
+        printf("输入进程号:");
+        scanf("%d",&n);
+        for(int i=0;i<psum;i++)
+        {
+            if ((*addr).process[i].pid==n){
+                if (ctrl==2) (*addr).process[i].send_state = 0;
+                else (*addr).process[i].send_state = 1;
+                break;
+            }                         //改变进程是否被禁言状态
+        }
+    }
+}
+
+void signal_to_all()
+{
+    int n = (*addr).psum;
+    for (int i=0;i<n;i++)
+    {
+        if ((*addr).process[i].state == 1) {
+            kill((*addr).process[i].pid,16);
+        }
+    }
+}  
+
+void *cleanmsg(void* arg)
+{
+    MSG *msg;
+    time_t t;
+    struct tm *p,*msg_p;  //通过tm结构来获得日期和时间
+    int i;
+    
+    while(1)
+    {
+        time(&t);       //此函数会返回从公元 1970 年1 月1 日的UTC 时间从0 时0 分0 秒算起到现在所经过的秒数。如果t 并非空指针的话，此函数也会将返回值存到t 指针所指的内存。
+        for (i = 0;i<(*addr).msgnum;i++)
+        {
+            double fl=difftime(t,(*addr).msg[i].t);     //返回两个time_t型变量之间的时间间隔
+            if (fl<=120.0) break;                      //时间差小于120s
+        }
+        if (i == 0)
+        {
+            sleep(10);
+            continue;
+        }                               //没有可清除msg
+        lockf(1,1,0);       //锁定屏幕输出
+ 
+        (*addr).msgnum=(*addr).msgnum-i;     //改变消息数
+        (*addr).temp=i;       //清除的消息数
+        signal_to_all();  //向所有在线进程发送信号
+        lockf(1,0,0);       //解锁.
+      
+        sleep(10);
+    }
+}
+
+void EXIT()
+{
+    int psum=(*addr).psum;
+    for (int i=0;i<psum;i++)
+    {
+        kill((*addr).process[i].pid,SIGUSR2);  
+    }
+    exit(0);
+}
+
+int main()
+{
+    init();
+    signal(SIGUSR1,check);
+    printf("1#---添加敏感词\n2#---删除敏感词\n3#---显示敏感词\n4#---管理线程\n5#---退出\n");
+    
+    pthread_t id1;
+    int err = pthread_create(&id1, NULL, cleanmsg, NULL);
+    if (err != 0)  
+        printf("can't create thread 1: %d\n", err);
+    char control[10];      //控制字符
+    while (1)
+    {
+        fgets(control,10,stdin);
+        if (strstr(control,"1#")!=NULL) write_senwd();
+        if (strstr(control,"2#")!=NULL) delete_senwd();
+        if (strstr(control,"3#")!=NULL) show_senwd();
+        if (strstr(control,"4#")!=NULL) manage();
+        if (strstr(control,"5#")!=NULL) {EXIT();exit(0);}
+    }
+    shmctl(shmid,IPC_RMID,0);     //撤消共享存储区，归还资源
+ exit(0);
+}
+
